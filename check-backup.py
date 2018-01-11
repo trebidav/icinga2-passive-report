@@ -101,7 +101,6 @@ if (args.filenames):
 size = 0
 maxAge = 0
 
-
 for file in files:
 	name = file[0].replace(os.path.join(args.dir, ''),"")
 	if not os.path.isfile(file[0]):
@@ -131,7 +130,6 @@ for file in files:
 		message+=("[CRITICAL] " + name + " size mismatch; " + str(os.path.getsize(file[0])) + "B vs " + str(file[1]) + "B (computed vs written in " + args.listname + ")\n")
 		exit = 2
 
-
 # if verbose is set, print output
 
 if args.verbose:
@@ -141,12 +139,11 @@ if args.verbose:
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-payload = { "exit_status": exit, "plugin_output": message, "performance_data": [ "size="+str(size)+"B", "age="+str(maxAge)+"s" ], "check_source": args.icingahost }
-auth=HTTPBasicAuth(args.icingaserveruser, args.icingaserverpass)
-headers = {'Accept': 'application/json',}
-params = (('service', args.icingahost + '!' + args.icingaservice),)
-url = 'https://icinga2.vlp.cz:5665/v1/actions/process-check-result'
-
+payload	= { "exit_status": exit, "plugin_output": message, "performance_data": [ "size="+str(size)+"B", "age="+str(maxAge)+"s" ], "check_source": args.icingahost }
+auth 	= HTTPBasicAuth(args.icingaserveruser, args.icingaserverpass)
+headers	= {'Accept': 'application/json',}
+params 	= (('service', args.icingahost + '!' + args.icingaservice),)
+url 	= 'https://' + args.icingaserverhost + ':'+ args.icingaserverport +'/v1/actions/process-check-result'
 
 # sent request to the icinga2 api
 
