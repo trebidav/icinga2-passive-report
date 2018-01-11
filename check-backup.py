@@ -33,7 +33,7 @@ parser.add_argument('--icingahost', 					type=str, 	metavar='hostname', 	help='N
 parser.add_argument('--icingaservice', 					type=str, 	metavar='servicename', 	help='Name of the Icinga2 service associated with the icingahost - defuault: MySQLBackup', default="MySQLBackup")
 parser.add_argument('--maxage', 			nargs='?',	type=int,	metavar='seconds',		help='Maximum age of backups in seconds - default 30h (108000s)', default=108000)
 parser.add_argument('--filenames',			nargs='+',	type=str, 	metavar='filename',	 	help='Filenames to check if present')
-parser.add_argument('--verbose', help='Increase verbosity level', default=False, action="store_true")
+parser.add_argument('--verbose', 			help='Increase verbosity level', default=False, action="store_true")
 
 args = parser.parse_args()
 exit = 0
@@ -78,7 +78,7 @@ for file in lists:
 				item[2] = float(item[2].rstrip("\n"))
 				files.append(item)
 	except Exception as exc:
-		print (exc)
+		print (exc, file=sys.stderr)
 		sys.exit("Couldn't read file or wrong format.")
 
 # if no files to check, exit
