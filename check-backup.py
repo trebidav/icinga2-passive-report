@@ -42,6 +42,10 @@ exit = 0
 new_dirs = []
 today = datetime.datetime.today()
 
+if not os.path.isdir(args.dir):
+	sys.exit("No directory named " + args.dir)
+
+
 for root, dirs, files in walklevel(args.dir.rstrip("/"),level=0):
     for name in dirs:
         filedate = datetime.datetime.fromtimestamp(os.path.getmtime(os.path.join(root, name)))
