@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 
+# David Trebicky 2017 davidtrebicky@gmail.com
+
 import os
 import argparse
 import sys
 import requests
 import datetime
+import json
+from requests.auth import HTTPBasicAuth
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
+
 
 def walklevel(some_dir, level=1):
     some_dir = some_dir.rstrip(os.path.sep)
@@ -17,28 +23,22 @@ def walklevel(some_dir, level=1):
             del dirs[:]
 
 parser = argparse.ArgumentParser(description='Checks folder if new backups are present and reports to Icinga2')
-parser.add_argument('--listname', nargs='?', metavar='filename', help='Name of the file which contains list of backed-up files (format: "filename;bytesize;ctime\\n") - default: list.txt', default="list.txt")
-parser.add_argument('--dir', nargs='?', metavar='directory', help='Directory where backups are stored - default: ./backup', default=os.path.dirname(sys.argv[0])+"/backup")
-parser.add_argument('--icingaserverhost', nargs='?', metavar='hostname', help='Icinga2 API server where the passive check should be processed - default: icinga2.vlp.cz', default="icinga2.vlp.cz")
-parser.add_argument('--icingaserverport', nargs='?', metavar='port', help='Icinga2 API server port - default: 5665', default="5665")
-parser.add_argument('--icingaserveruser', nargs='?', metavar='username', help='Icinga2 API user - default: root', default="root")
-parser.add_argument('--icingaserverpass', nargs='?', metavar='password', help='Icinga2 API password - default: root', default="root")
-parser.add_argument('--icingahost', nargs='?', metavar='hostname', help='Name of the Icinga2 host - default: icinga2.vlp.cz', default="icinga2.vlp.cz")
-parser.add_argument('--icingaservice', nargs='?', metavar='servicename', help='Name of the Icinga2 service associated with the icingahost - defuault: external-check', default="external-check")
-parser.add_argument('--maxage', nargs='?', metavar='seconds', type=int, help='Maximum age of backups in seconds - default 30h (108000s)', default=108000)
-parser.add_argument('--filenames', metavar='N', type=str, nargs='+', help='Filenames to check if present')
+parser.add_argument('--listname', 			nargs='?', 				metavar='filename', 	help='Name of the file which contains list of backed-up files (format: "filename;bytesize;ctime\\n") - default: list.txt', default="list.txt")
+parser.add_argument('--dir', 				nargs='?', 				metavar='directory', 	help='Directory where backups are stored - default: ./backup', default=os.path.dirname(sys.argv[0])+"/backup")
+parser.add_argument('--icingaserverhost', 	nargs='?', 	type=str, 	metavar='hostname', 	help='Icinga2 API server where the passive check should be processed - default: icinga2.vlp.cz', default="icinga2.vlp.cz")
+parser.add_argument('--icingaserverport', 	nargs='?', 	type=str, 	metavar='port', 		help='Icinga2 API server port - default: 5665', default="5665")
+parser.add_argument('--icingaserveruser', 	nargs='?', 	type=str, 	metavar='username', 	help='Icinga2 API user (should be user with minimal privileges - not root) - default: root', default="root")
+parser.add_argument('--icingaserverpass', 	nargs='?', 	type=str, 	metavar='password', 	help='Icinga2 API password - default: root', default="root")
+parser.add_argument('--icingahost', 					type=str, 	metavar='hostname', 	help='Name of the Icinga2 host', default="icinga2.vlp.cz", required=True)
+parser.add_argument('--icingaservice', 					type=str, 	metavar='servicename', 	help='Name of the Icinga2 service associated with the icingahost - defuault: MySQLBackup', default="MySQLBackup")
+parser.add_argument('--maxage', 			nargs='?',	type=int,	metavar='seconds',		help='Maximum age of backups in seconds - default 30h (108000s)', default=108000)
+parser.add_argument('--filenames',			nargs='+',	type=str, 	metavar='filename',	 	help='Filenames to check if present')
 parser.add_argument('--verbose', help='Increase verbosity level', default=False, action="store_true")
-parser.add_argument('--sendfails', help='Send passive check if script fails', default=False, action="store_true")
 
 args = parser.parse_args()
 exit = 0
 
-# create url from arguments
-
-url = 'https://'+ args.icingaserverhost + ':' + args.icingaserverport + '/v1/actions/process-check-result?service=' + args.icingahost + "!" + args.icingaservice
-#print(url)
-
-# get all dirs newer than args.maxage
+# get all dirs newer than args.maxage
 new_dirs = []
 today = datetime.datetime.today()
 
@@ -51,9 +51,9 @@ for root, dirs, files in walklevel(args.dir.rstrip("/"),level=0):
 # if no new directories, exit
 
 if (len(new_dirs) == 0):
-	exit(1)      
+	sys.exit("No new directories.")
 
-# construct path to all filelists (eg. list.txt) files
+# construct path to all filelists (eg. list.txt) files
 
 lists = []
 
@@ -75,44 +75,79 @@ for file in lists:
 				files.append(item)
 	except Exception as exc:
 		print (exc)
-		exit(1)
+		sys.exit("Couldn't read file or wrong format.")
 
 # if no files to check, exit
 
 if (len(files) == 0):
-	exit(1)      
+	sys.exit("No files to check.")
+
+
+message = ""
+
+if (args.filenames):
+	for name in args.filenames:
+		if not any(name in s for s in [item[0] for item in files]): #very very pythonic :D basically if the filenames defined are substrings of any backed-up files (you can omit .tar.gz for example)
+			exit = 2
+			message += "[CRITICAL] Missing file " + name + "\n"
 
 
 # check the actual backup files (zatim nebezpecny, potreba ovyjimkovat)
 
-for file in files:
-	
-	if os.path.getsize(file[0]) == file[1]:
+size = 0
+maxAge = 0
 
-		age = (today - datetime.datetime.fromtimestamp(file[2])).total_seconds()
+
+for file in files:
+	name = file[0].replace(os.path.join(args.dir, ''),"")
+	if not os.path.isfile(file[0]):
+		message += "[CRITICAL] " + name + " is not present on the server but is in the "+ args.listname +"\n"
+		continue
+
+	age		= (today - datetime.datetime.fromtimestamp(file[2])).total_seconds()	
+	maxAge 	= max(maxAge, age)
+	curSize	= os.path.getsize(file[0])
+	size	+= curSize
+
+	if curSize == file[1]:
 
 		if (age < args.maxage):
-			print ("[OK] " + file[0] + "\t; size: " + str(file[1]) + "B\t; age: " + str((today - datetime.datetime.fromtimestamp(file[2])).total_seconds()).split(".",1)[0] + "s")	
+			message+=("[OK] " + name + "; size: " + str(file[1]) + "B; age: " + str(age).split(".",1)[0] + "s\n")	
+		
 		elif (age < 2*args.maxage):
-			print ("[WARN] " + file[0] + "\t; size: " + str(file[1]) + "B\t; age: " + str((today - datetime.datetime.fromtimestamp(file[2])).total_seconds()).split(".",1)[0] + "s (too old)")
+			message+=("[WARNING] " + name + "; size: " + str(file[1]) + "B; age: " + str(age).split(".",1)[0] + "s (too old)\n")
+
 			if (exit < 2):
 				exit = 1
+
 		else:
-			print ("[CRIT] " + file[0] + "\t; size: " + str(file[1]) + "B\t; age: " + str((today - datetime.datetime.fromtimestamp(file[2])).total_seconds()).split(".",1)[0] + "s (too old)")
+			message+=("[CRITICAL] " + name + "; size: " + str(file[1]) + "B; age: " + str(age).split(".",1)[0] + "s (too old)\n")
+			exit = 2
 	else:
-		print ("[CRIT] " + file[0] + " size mismatch\t; " + str(os.path.getsize(file[0])) + "B vs " + str(file[1]) + "B (computed vs written in " + args.listname + ")")
+		message+=("[CRITICAL] " + name + " size mismatch; " + str(os.path.getsize(file[0])) + "B vs " + str(file[1]) + "B (computed vs written in " + args.listname + ")\n")
 		exit = 2
 
 
-# send results
+# if verbose is set, print output
 
-if (exit == 2):
-	print ("Result: Critical")
-elif(exit == 1):
-	print ("Result: Warning")
-elif (exit == 0): 
-	print ("Result: OK")
+if args.verbose:
+	print(message)
+	print("Oldest file: " + str(maxAge) + "s")
+	print("Size of all files: " + str(size)+ "B")
+
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+payload = { "exit_status": exit, "plugin_output": message, "performance_data": [ "size="+str(size)+"B", "age="+str(maxAge)+"s" ], "check_source": args.icingahost }
+auth=HTTPBasicAuth(args.icingaserveruser, args.icingaserverpass)
+headers = {'Accept': 'application/json',}
+params = (('service', args.icingahost + '!' + args.icingaservice),)
+url = 'https://icinga2.vlp.cz:5665/v1/actions/process-check-result'
+
+
+# sent request to the icinga2 api
+
+r = requests.post(url, data=json.dumps(payload), auth=auth, verify=False, headers=headers, params=params)
 
 
 
-#'{ "exit_status": 0, "plugin_output": "OK - files backed up", "performance_data": [ "size=", "age=" ], "check_source": "args.icingahost" }'
+
