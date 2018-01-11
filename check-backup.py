@@ -146,9 +146,11 @@ params 	= (('service', args.icingahost + '!' + args.icingaservice),)
 url 	= 'https://' + args.icingaserverhost + ':'+ args.icingaserverport +'/v1/actions/process-check-result'
 
 # sent request to the icinga2 api
-
-r = requests.post(url, data=json.dumps(payload), auth=auth, verify=False, headers=headers, params=params)
-
+try:
+	r = requests.post(url, data=json.dumps(payload), auth=auth, verify=False, headers=headers, params=params)
+except:
+	print (exc, file=sys.stderr)
+	sys.exit("Error sending the passive check.")
 
 
 
